@@ -595,7 +595,10 @@ function ImportPreviewModal({
             ) : null}
           </View>
 
-          <Text style={styles.modalNote}>Nothing is saved until you confirm.</Text>
+          <Text style={styles.modalNote}>
+            Nothing is saved until you confirm. Re-importing updates existing shows and movies
+            with this file's values; episodes you marked watched in the app are kept.
+          </Text>
 
           <View style={styles.modalButtons}>
             <Pressable
