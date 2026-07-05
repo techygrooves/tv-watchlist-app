@@ -7,11 +7,11 @@ import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-nati
 
 import { Screen } from '@/src/components/Screen';
 import { SectionHeader } from '@/src/components/SectionHeader';
-import { recordImportFile } from '@/src/db/database';
+import { recordImportFile } from '@/src/lib/db';
 import { colors, radius, spacing, typography } from '@/src/theme';
 import type { ImportFile } from '@/src/types';
 
-export default function SettingsScreen() {
+export default function ProfileScreen() {
   const db = useSQLiteContext();
   const [imports, setImports] = useState<ImportFile[]>([]);
   const [picking, setPicking] = useState(false);

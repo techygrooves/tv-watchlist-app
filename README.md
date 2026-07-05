@@ -21,19 +21,20 @@ npm run typecheck  # TypeScript check
 ## Project structure
 
 ```
-app/                  expo-router routes
-  _layout.tsx         root layout: SQLite provider + DB migration on boot
-  (tabs)/             bottom tab navigator
-    index.tsx         Shows
-    movies.tsx        Movies
-    explore.tsx       Explore (search later)
-    upcoming.tsx      Upcoming episodes
-    settings.tsx      Profile / Settings + TV Time HTML import
 src/
-  theme.ts            dark theme with gold accent
+  app/                expo-router routes
+    _layout.tsx       root layout: SQLite provider + DB migration on boot
+    (tabs)/           bottom tab navigator
+      index.tsx       Shows (default tab)
+      movies.tsx      Movies
+      explore.tsx     Explore (search later)
+      upcoming.tsx    Upcoming episodes
+      profile.tsx     Profile / Settings + TV Time HTML import
+  lib/db.ts           SQLite DDL (media_items, episodes, watch_events, import_files,
+                      app_settings) + versioned migrations + query helpers
+  theme/colors.ts     dark theme palette with gold accent
+  theme/index.ts      spacing, radius, typography tokens
   types.ts            domain types mirroring the DB schema
-  db/schema.ts        SQLite DDL (media_items, episodes, watch_events, import_files, app_settings)
-  db/database.ts      migrations + query helpers
   components/         PosterCard, ProgressBar, Screen, SectionHeader, EmptyState
   data/placeholders.ts placeholder list data for Phase 1
 ```
