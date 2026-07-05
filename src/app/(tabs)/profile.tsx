@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import { File } from 'expo-file-system';
 import { useSQLiteContext } from 'expo-sqlite';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
@@ -16,6 +16,7 @@ import {
 
 import { Screen } from '@/src/components/Screen';
 import { SectionHeader } from '@/src/components/SectionHeader';
+import { enrichMissingMetadata, type EnrichProgress } from '@/src/lib/enrichment';
 import {
   buildEpisodesCsv,
   buildMediaItemsCsv,
@@ -25,6 +26,7 @@ import {
 } from '@/src/lib/exporter';
 import { saveTvTimeImport, type ImportResult } from '@/src/lib/importer';
 import { getAppStats, listImportFiles, type AppStats } from '@/src/lib/queries';
+import { fetchSeries, tvdbLogin, TvdbError } from '@/src/lib/tvdb';
 import {
   parseTvTimeExport,
   TvTimeParseError,
@@ -51,7 +53,9 @@ async function readAssetText(asset: DocumentPicker.DocumentPickerAsset): Promise
 export default function ProfileScreen() {
   const db = useSQLiteContext();
   const [imports, setImports] = useState<ImportFile[]>([]);
-  const [busy, setBusy] = useState<'picking' | 'saving' | 'exporting' | null>(null);
+  const [busy, setBusy] = useState<'picking' | 'saving' | 'exporting' | 'tvdb' | null>(null);
+  const [enrich, setEnrich] = useState<EnrichProgress | null>(null);
+  const cancelEnrich = useRef(false);
   const [pending, setPending] = useState<PendingImport | null>(null);
   const [lastResult, setLastResult] = useState<ImportResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -138,6 +142,49 @@ export default function ProfileScreen() {
     setStats(await getAppStats(db));
   }, [db]);
 
+  const onTestTvdb = useCallback(async () => {
+    setBusy('tvdb');
+    setError(null);
+    setNotice(null);
+    try {
+      await tvdbLogin(db);
+      const sample = await db.getFirstAsync<{ tvdb_id: number; title: string }>(
+        "SELECT tvdb_id, title FROM media_items WHERE media_type = 'show' ORDER BY title LIMIT 1",
+      );
+      if (!sample) {
+        setNotice('TVDB login OK. Import your TV Time data to test a show lookup.');
+        return;
+      }
+      const info = await fetchSeries(db, sample.tvdb_id);
+      setNotice(
+        `TVDB API works. Logged in and fetched TVDB ID ${sample.tvdb_id}: "${info.name ?? sample.title}"${info.year ? ` (${info.year})` : ''}.`,
+      );
+    } catch (err) {
+      setError(err instanceof TvdbError ? err.message : `TVDB test failed: ${String(err)}`);
+    } finally {
+      setBusy(null);
+    }
+  }, [db]);
+
+  const onFetchMetadata = useCallback(async () => {
+    setError(null);
+    setNotice(null);
+    cancelEnrich.current = false;
+    try {
+      const result = await enrichMissingMetadata(db, {
+        onProgress: setEnrich,
+        shouldCancel: () => cancelEnrich.current,
+      });
+      setNotice(
+        `Metadata fetch ${cancelEnrich.current ? 'stopped' : 'finished'}: ${result.updated} updated, ${result.failed} failed, ${result.skipped} skipped (no TVDB record), ${result.needsReview} need review, of ${result.total} total. ${result.failed > 0 ? 'Tap again to retry failed items.' : ''}`,
+      );
+    } catch (err) {
+      setError(err instanceof TvdbError ? err.message : `Metadata fetch failed: ${String(err)}`);
+    } finally {
+      setEnrich(null);
+    }
+  }, [db]);
+
   const confirmImport = useCallback(async () => {
     if (!pending) return;
     setBusy('saving');
@@ -221,6 +268,28 @@ export default function ProfileScreen() {
           <SettingRow icon="stats-chart" label="App Statistics" onPress={onShowStats} />
         </View>
 
+        <SectionHeader label="TVDB Metadata" />
+        <View style={styles.group}>
+          <SettingRow
+            icon="flash"
+            label="Test TVDB API"
+            detail={busy === 'tvdb' ? 'Testing…' : 'Login + lookup'}
+            disabled={busy !== null || enrich !== null}
+            onPress={onTestTvdb}
+          />
+          <SettingRow
+            icon="images"
+            label="Fetch Missing Metadata"
+            detail="Posters, descriptions, episodes"
+            disabled={busy !== null || enrich !== null}
+            onPress={onFetchMetadata}
+          />
+          <Text style={styles.hint}>
+            Uses your TVDB API key from .env (EXPO_PUBLIC_TVDB_API_KEY). Imported data and your
+            watch history are never overwritten.
+          </Text>
+        </View>
+
         {imports.length > 0 ? (
           <>
             <SectionHeader label="Import history" count={imports.length} />
@@ -261,7 +330,54 @@ export default function ProfileScreen() {
         onConfirm={confirmImport}
       />
       <StatsModal stats={stats} onClose={() => setStats(null)} />
+      <EnrichModal progress={enrich} onCancel={() => (cancelEnrich.current = true)} />
     </Screen>
+  );
+}
+
+function EnrichModal({
+  progress,
+  onCancel,
+}: {
+  progress: EnrichProgress | null;
+  onCancel: () => void;
+}) {
+  if (!progress) return null;
+  const rows: [string, string | number][] = [
+    ['Total items', progress.total],
+    ['Processed', progress.processed],
+    ['Updated', progress.updated],
+    ['Failed', progress.failed],
+    ['Skipped (no TVDB record)', progress.skipped],
+    ['Needs review', progress.needsReview],
+  ];
+  return (
+    <Modal transparent animationType="fade" visible onRequestClose={onCancel}>
+      <View style={styles.modalBackdrop}>
+        <View style={styles.modalCard}>
+          <Text style={styles.modalTitle}>Fetching metadata…</Text>
+          <Text style={styles.modalFile} numberOfLines={1}>
+            {progress.currentTitle ?? 'Preparing…'}
+          </Text>
+          <View style={styles.statsGrid}>
+            {rows.map(([label, value]) => (
+              <View key={label} style={styles.statRow}>
+                <Text style={styles.statLabel}>{label}</Text>
+                <Text style={styles.statValue}>{value}</Text>
+              </View>
+            ))}
+          </View>
+          <View style={styles.modalButtons}>
+            <Pressable
+              onPress={onCancel}
+              style={({ pressed }) => [styles.cancelButton, pressed && { opacity: 0.7 }]}
+            >
+              <Text style={styles.cancelButtonText}>Stop after current item</Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    </Modal>
   );
 }
 

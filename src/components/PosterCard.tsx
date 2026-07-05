@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ProgressBar } from '@/src/components/ProgressBar';
 import { colors, radius, spacing, typography } from '@/src/theme';
@@ -14,6 +14,8 @@ export interface PosterCardItem {
   progress?: number;
   isFavorite?: boolean;
   isWatched?: boolean;
+  /** Real artwork (TVDB); falls back to the initials placeholder when absent. */
+  posterUrl?: string | null;
 }
 
 /**
@@ -38,7 +40,11 @@ export function PosterCard({
       android_ripple={{ color: colors.border }}
     >
       <View style={[styles.poster, { backgroundColor: posterColor(item.tvdbId) }]}>
-        <Text style={styles.posterInitials}>{initials(item.title)}</Text>
+        {item.posterUrl ? (
+          <Image source={{ uri: item.posterUrl }} style={styles.posterImage} />
+        ) : (
+          <Text style={styles.posterInitials}>{initials(item.title)}</Text>
+        )}
         {item.isFavorite ? (
           <View style={styles.favoriteBadge}>
             <Ionicons name="star" size={12} color={colors.favorite} />
@@ -121,6 +127,11 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     color: 'rgba(255,255,255,0.85)',
+  },
+  posterImage: {
+    width: POSTER_WIDTH,
+    height: POSTER_HEIGHT,
+    borderRadius: radius.sm,
   },
   favoriteBadge: {
     position: 'absolute',

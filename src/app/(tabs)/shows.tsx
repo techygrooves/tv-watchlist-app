@@ -140,6 +140,7 @@ export default function ShowsScreen() {
               item={{
                 tvdbId: item.tvdb_id,
                 title: item.title,
+                posterUrl: item.poster_url,
                 detail: showDetail(item),
                 progress:
                   item.progress_percent !== null ? item.progress_percent / 100 : undefined,
