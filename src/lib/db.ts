@@ -9,13 +9,14 @@ export const DATABASE_NAME = 'tv-watchlist.db';
  * - media_items holds both shows and movies, discriminated by media_type.
  *   The row id is "show:{tvdbId}" / "movie:{tvdbId}" — the TVDB numeric ID
  *   is the canonical external identifier, never the title.
- * - episodes: for imported shows these are the *unwatched* regular episodes
- *   reported by TV Time (placeholders; no titles/dates until a later phase).
+ * - episodes: individual checklist items per show — seeded from the import's
+ *   unwatchedRegularEps, completed with the TVDB catalog, and extended by
+ *   the update checker (added_at marks discovery time).
  * - watch_events is an append-only log. Movie imports create
  *   'imported_watched' events carrying the original TV Time watchedAt
- *   timestamp; manual toggles (Phase 3) will create 'manual' events and
- *   undo deletes the most recent row. Show episode dates are NOT invented —
- *   the TV Time export does not include per-episode watch dates.
+ *   timestamp; manual toggles create 'manual' events with the action
+ *   column recording watched/unwatched. Historical show episode dates are
+ *   NOT invented — the TV Time export does not include per-episode dates.
  * - import_files records every parsed TV Time HTML import with counts and
  *   a JSON summary snapshot.
  * - app_settings is a simple key/value store.

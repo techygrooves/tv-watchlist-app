@@ -78,11 +78,6 @@ async function importCutoffDate(db: SQLiteDatabase, item: MediaItem): Promise<st
   return (row?.d ?? item.added_at).slice(0, 10);
 }
 
-/** Never replace a good value with an empty one. */
-function keep<T>(current: T | null, incoming: T | null): T | null {
-  return incoming ?? current;
-}
-
 /**
  * Enriches one show: media fields + full episode catalog with progress
  * reconciliation. Returns true when the derived watched count disagrees

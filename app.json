@@ -7,7 +7,11 @@
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#0D0D10",
-    "platforms": ["android", "ios", "web"],
+    "platforms": [
+      "android",
+      "ios",
+      "web"
+    ],
     "web": {
       "output": "single",
       "bundler": "metro"
@@ -16,7 +20,11 @@
       "package": "com.techygrooves.tvwatchlist",
       "edgeToEdgeEnabled": true
     },
-    "plugins": ["expo-router", "expo-sqlite"],
+    "plugins": [
+      "expo-router",
+      "expo-sqlite",
+      "expo-notifications"
+    ],
     "experiments": {
       "typedRoutes": true
     }

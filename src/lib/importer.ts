@@ -162,6 +162,37 @@ export async function saveTvTimeImport(
       await insertWatchEvent.finalizeAsync();
     }
 
+    // Re-import reconciliation: the upsert above wrote the file's counts,
+    // but user changes survive on episode rows (watched rows are kept and
+    // enriched catalogs aren't re-imported). Bring show-level counts back
+    // in line with the rows so the header never contradicts the checklist.
+    // - enriched shows (full TVDB catalog): totals derive entirely from rows;
+    // - import-only shows: total stays the file's value, watched = total
+    //   minus the remaining unwatched rows (rows cover exactly that set).
+    await db.execAsync(`
+      UPDATE media_items SET
+        total_count = CASE
+          WHEN metadata_fetched_at IS NOT NULL
+            THEN (SELECT COUNT(*) FROM episodes e WHERE e.media_item_id = media_items.id AND e.is_special = 0)
+          ELSE total_count END,
+        watched_count = CASE
+          WHEN metadata_fetched_at IS NOT NULL
+            THEN (SELECT COUNT(*) FROM episodes e WHERE e.media_item_id = media_items.id AND e.is_special = 0 AND e.is_watched = 1)
+          ELSE MAX(0, COALESCE(total_count, 0) - (SELECT COUNT(*) FROM episodes e WHERE e.media_item_id = media_items.id AND e.is_special = 0 AND e.is_watched = 0))
+          END,
+        updated_at = datetime('now')
+      WHERE media_type = 'show'
+        AND (metadata_fetched_at IS NOT NULL
+             OR EXISTS (SELECT 1 FROM episodes e WHERE e.media_item_id = media_items.id AND e.is_watched = 1));
+      UPDATE media_items SET
+        progress_percent = CASE WHEN COALESCE(total_count, 0) > 0
+          THEN ROUND(100.0 * watched_count / total_count, 1) ELSE progress_percent END,
+        is_watched = CASE WHEN COALESCE(total_count, 0) > 0 AND watched_count >= total_count THEN 1 ELSE 0 END
+      WHERE media_type = 'show'
+        AND (metadata_fetched_at IS NOT NULL
+             OR EXISTS (SELECT 1 FROM episodes e WHERE e.media_item_id = media_items.id AND e.is_watched = 1));
+    `);
+
     const record = await db.runAsync(
       `INSERT INTO import_files (file_name, file_uri, file_size, status, shows_count, movies_count, raw_summary)
        VALUES (?, ?, ?, 'parsed', ?, ?, ?)`,
