@@ -1,6 +1,6 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 
-import type { ImportFile, MediaItem } from '@/src/types';
+import type { Episode, ImportFile, MediaItem } from '@/src/types';
 
 // Title search uses instr(lower(title), lower(?)) — a literal, case-
 // insensitive substring match. LIKE-with-bound-parameter misbehaves on the
@@ -78,6 +78,35 @@ export async function listMovies(
 
 export async function getMediaItem(db: SQLiteDatabase, id: string): Promise<MediaItem | null> {
   return db.getFirstAsync<MediaItem>('SELECT * FROM media_items WHERE id = ?', id);
+}
+
+/** All known episode rows for a show, ordered for a season-grouped checklist. */
+export async function listEpisodes(db: SQLiteDatabase, mediaItemId: string): Promise<Episode[]> {
+  return db.getAllAsync<Episode>(
+    'SELECT * FROM episodes WHERE media_item_id = ? ORDER BY season_number, episode_number',
+    mediaItemId,
+  );
+}
+
+export interface EpisodeStats {
+  episodeRows: number;
+  watchedEpisodes: number;
+  unwatchedEpisodes: number;
+}
+
+export async function getEpisodeStats(db: SQLiteDatabase): Promise<EpisodeStats> {
+  const row = await db.getFirstAsync<EpisodeStats>(
+    `SELECT
+       COUNT(*) AS episodeRows,
+       SUM(is_watched = 1) AS watchedEpisodes,
+       SUM(is_watched = 0) AS unwatchedEpisodes
+     FROM episodes`,
+  );
+  return {
+    episodeRows: row?.episodeRows ?? 0,
+    watchedEpisodes: row?.watchedEpisodes ?? 0,
+    unwatchedEpisodes: row?.unwatchedEpisodes ?? 0,
+  };
 }
 
 export async function listImportFiles(db: SQLiteDatabase, limit = 10): Promise<ImportFile[]> {

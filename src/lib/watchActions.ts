@@ -1,6 +1,6 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 
-import type { MediaItem } from '@/src/types';
+import type { Episode, MediaItem } from '@/src/types';
 
 /**
  * Watched/unwatched actions for movies and shows.
@@ -134,6 +134,13 @@ export async function markShowWatched(
 ): Promise<MediaSnapshot> {
   const snapshot = snapshotOf(item);
   const timestamp = nowIso();
+  // Marking a show watched checks off every remaining episode too (like
+  // TV Time). One show-level event is logged, not one per episode.
+  await db.runAsync(
+    'UPDATE episodes SET is_watched = 1, watched_at = ? WHERE media_item_id = ? AND is_watched = 0',
+    timestamp,
+    item.id,
+  );
   await db.runAsync(
     "UPDATE media_items SET is_watched = 1, watched_count = COALESCE(total_count, watched_count), progress_percent = 100, updated_at = datetime('now') WHERE id = ?",
     item.id,
@@ -149,8 +156,13 @@ export async function markShowUnwatched(
   const snapshot = snapshotOf(item);
   const timestamp = nowIso();
   // Restore the progress TV Time reported at import time where possible,
-  // rather than zeroing the user's history.
+  // rather than zeroing the user's history. Episode rows go back to their
+  // imported (unwatched) state to match.
   const imported = importedShowProgress(item);
+  await db.runAsync(
+    'UPDATE episodes SET is_watched = 0, watched_at = NULL WHERE media_item_id = ? AND is_watched = 1',
+    item.id,
+  );
   await db.runAsync(
     "UPDATE media_items SET is_watched = 0, watched_count = ?, progress_percent = ?, updated_at = datetime('now') WHERE id = ?",
     imported ? imported.watched : item.watched_count,
@@ -159,6 +171,130 @@ export async function markShowUnwatched(
   );
   await logEvent(db, item.id, 'unwatched', timestamp);
   return snapshot;
+}
+
+export interface EpisodeSnapshot {
+  episodeId: number;
+  is_watched: 0 | 1;
+  watched_at: string | null;
+  show: MediaSnapshot;
+}
+
+async function logEpisodeEvent(
+  db: SQLiteDatabase,
+  mediaItemId: string,
+  episodeId: number,
+  action: WatchAction,
+  timestamp: string,
+): Promise<void> {
+  await db.runAsync(
+    "INSERT INTO watch_events (media_item_id, episode_id, action, watched_at, source, created_at) VALUES (?, ?, ?, ?, 'manual', ?)",
+    mediaItemId,
+    episodeId,
+    action,
+    timestamp,
+    timestamp,
+  );
+}
+
+/**
+ * Recomputes the parent show's progress from its episode rows. The imported
+ * episode rows cover exactly the unwatched set (verified against the TV Time
+ * export: watched + unwatchedRegularEps == total for every show), so
+ * watched = total − (rows still unwatched). Shows without a usable
+ * total_count keep their imported counts untouched.
+ */
+async function recomputeShowProgress(db: SQLiteDatabase, mediaItemId: string): Promise<void> {
+  await db.runAsync(
+    `UPDATE media_items SET
+       watched_count = CASE WHEN COALESCE(total_count, 0) > 0
+         THEN total_count - (SELECT COUNT(*) FROM episodes e WHERE e.media_item_id = media_items.id AND e.is_watched = 0)
+         ELSE watched_count END,
+       progress_percent = CASE WHEN COALESCE(total_count, 0) > 0
+         THEN ROUND(100.0 * (total_count - (SELECT COUNT(*) FROM episodes e WHERE e.media_item_id = media_items.id AND e.is_watched = 0)) / total_count, 1)
+         ELSE progress_percent END,
+       is_watched = CASE WHEN COALESCE(total_count, 0) > 0
+         AND (SELECT COUNT(*) FROM episodes e WHERE e.media_item_id = media_items.id AND e.is_watched = 0) = 0
+         THEN 1 ELSE is_watched END,
+       updated_at = datetime('now')
+     WHERE id = ?`,
+    mediaItemId,
+  );
+}
+
+export async function markEpisodeWatched(
+  db: SQLiteDatabase,
+  show: MediaItem,
+  episode: Episode,
+): Promise<EpisodeSnapshot> {
+  const snapshot: EpisodeSnapshot = {
+    episodeId: episode.id,
+    is_watched: episode.is_watched,
+    watched_at: episode.watched_at,
+    show: snapshotOf(show),
+  };
+  const timestamp = nowIso();
+  await db.runAsync(
+    'UPDATE episodes SET is_watched = 1, watched_at = ? WHERE id = ?',
+    timestamp,
+    episode.id,
+  );
+  await recomputeShowProgress(db, show.id);
+  await logEpisodeEvent(db, show.id, episode.id, 'watched', timestamp);
+  return snapshot;
+}
+
+export async function markEpisodeUnwatched(
+  db: SQLiteDatabase,
+  show: MediaItem,
+  episode: Episode,
+): Promise<EpisodeSnapshot> {
+  const snapshot: EpisodeSnapshot = {
+    episodeId: episode.id,
+    is_watched: episode.is_watched,
+    watched_at: episode.watched_at,
+    show: snapshotOf(show),
+  };
+  const timestamp = nowIso();
+  await db.runAsync(
+    'UPDATE episodes SET is_watched = 0, watched_at = NULL WHERE id = ?',
+    episode.id,
+  );
+  // A show that was fully watched is no longer.
+  await db.runAsync('UPDATE media_items SET is_watched = 0 WHERE id = ?', show.id);
+  await recomputeShowProgress(db, show.id);
+  await logEpisodeEvent(db, show.id, episode.id, 'unwatched', timestamp);
+  return snapshot;
+}
+
+/** Undo for an episode toggle: restores the episode row and the parent show's fields. */
+export async function restoreEpisodeSnapshot(
+  db: SQLiteDatabase,
+  snapshot: EpisodeSnapshot,
+): Promise<void> {
+  const timestamp = nowIso();
+  await db.runAsync(
+    'UPDATE episodes SET is_watched = ?, watched_at = ? WHERE id = ?',
+    snapshot.is_watched,
+    snapshot.watched_at,
+    snapshot.episodeId,
+  );
+  await db.runAsync(
+    "UPDATE media_items SET is_watched = ?, watched_at = ?, rewatch_count = ?, watched_count = ?, progress_percent = ?, updated_at = datetime('now') WHERE id = ?",
+    snapshot.show.is_watched,
+    snapshot.show.watched_at,
+    snapshot.show.rewatch_count,
+    snapshot.show.watched_count,
+    snapshot.show.progress_percent,
+    snapshot.show.id,
+  );
+  await logEpisodeEvent(
+    db,
+    snapshot.show.id,
+    snapshot.episodeId,
+    snapshot.is_watched === 1 ? 'watched' : 'unwatched',
+    timestamp,
+  );
 }
 
 /**

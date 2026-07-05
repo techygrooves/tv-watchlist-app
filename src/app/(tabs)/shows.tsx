@@ -1,4 +1,4 @@
-import { useFocusEffect } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useEffect, useState } from 'react';
 import { FlatList } from 'react-native';
@@ -146,6 +146,9 @@ export default function ShowsScreen() {
                 isFavorite: item.is_favorite === 1,
                 isWatched: item.is_watched === 1,
               }}
+              onPress={() =>
+                router.push({ pathname: '/show/[id]', params: { id: item.id } })
+              }
               onToggleWatched={() => onToggle(item)}
             />
           )}
