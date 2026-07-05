@@ -27,6 +27,7 @@ export interface MediaItem {
   rewatch_count: number;
   on_watchlist: 0 | 1;
   raw_json: string | null;
+  metadata_fetched_at: string | null;
   added_at: string;
   updated_at: string;
 }

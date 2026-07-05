@@ -116,6 +116,51 @@ export async function listImportFiles(db: SQLiteDatabase, limit = 10): Promise<I
   );
 }
 
+export interface UpcomingEpisode extends Episode {
+  show_id: string;
+  show_title: string;
+  show_poster: string | null;
+  show_tvdb_id: number;
+}
+
+/** Unwatched episodes airing today or later, soonest first. */
+export async function listUpcomingEpisodes(
+  db: SQLiteDatabase,
+  limit = 100,
+): Promise<UpcomingEpisode[]> {
+  return db.getAllAsync<UpcomingEpisode>(
+    `SELECT e.*, m.id AS show_id, m.title AS show_title, m.poster_url AS show_poster, m.tvdb_id AS show_tvdb_id
+     FROM episodes e
+     JOIN media_items m ON m.id = e.media_item_id
+     WHERE e.is_watched = 0 AND m.on_watchlist = 1
+       AND e.air_date IS NOT NULL AND e.air_date >= date('now')
+     ORDER BY e.air_date ASC, m.title COLLATE NOCASE, e.season_number, e.episode_number
+     LIMIT ?`,
+    limit,
+  );
+}
+
+/** Fallback when nothing has future air dates: each show's next unwatched episode. */
+export async function listNextUnwatchedEpisodes(
+  db: SQLiteDatabase,
+  limit = 100,
+): Promise<UpcomingEpisode[]> {
+  return db.getAllAsync<UpcomingEpisode>(
+    `SELECT e.*, m.id AS show_id, m.title AS show_title, m.poster_url AS show_poster, m.tvdb_id AS show_tvdb_id
+     FROM episodes e
+     JOIN media_items m ON m.id = e.media_item_id
+     WHERE e.is_watched = 0 AND m.on_watchlist = 1 AND e.is_special = 0
+       AND e.id = (
+         SELECT e2.id FROM episodes e2
+         WHERE e2.media_item_id = e.media_item_id AND e2.is_watched = 0 AND e2.is_special = 0
+         ORDER BY e2.season_number, e2.episode_number LIMIT 1
+       )
+     ORDER BY m.title COLLATE NOCASE
+     LIMIT ?`,
+    limit,
+  );
+}
+
 export interface AppStats {
   totalShows: number;
   totalMovies: number;

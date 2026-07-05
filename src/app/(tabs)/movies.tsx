@@ -126,6 +126,7 @@ export default function MoviesScreen() {
               item={{
                 tvdbId: item.tvdb_id,
                 title: item.title,
+                posterUrl: item.poster_url,
                 detail: movieDetail(item),
                 isFavorite: item.is_favorite === 1,
                 isWatched: item.is_watched === 1,

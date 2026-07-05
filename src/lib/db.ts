@@ -20,7 +20,7 @@ export const DATABASE_NAME = 'tv-watchlist.db';
  *   a JSON summary snapshot.
  * - app_settings is a simple key/value store.
  */
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS media_items (
@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS media_items (
   rewatch_count    INTEGER NOT NULL DEFAULT 0,
   on_watchlist     INTEGER NOT NULL DEFAULT 1,
   raw_json         TEXT,
+  metadata_fetched_at TEXT,
   added_at         TEXT    NOT NULL DEFAULT (datetime('now')),
   updated_at       TEXT    NOT NULL DEFAULT (datetime('now')),
   UNIQUE (tvdb_id, media_type)
@@ -142,8 +143,12 @@ export async function migrateDb(db: SQLiteDatabase): Promise<void> {
         ALTER TABLE episodes ADD COLUMN raw_json TEXT;
       `);
     }
+    if (currentVersion < 5) {
+      // v4 → v5: track when TVDB metadata was last fetched per item.
+      await db.execAsync('ALTER TABLE media_items ADD COLUMN metadata_fetched_at TEXT');
+    }
   }
-  // Future migrations: if (currentVersion < 5) { ... }
+  // Future migrations: if (currentVersion < 6) { ... }
 
   await db.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }

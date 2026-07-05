@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Pressable, SectionList, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, SectionList, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ProgressBar } from '@/src/components/ProgressBar';
@@ -95,12 +95,15 @@ export default function ShowDetailScreen() {
     await refresh();
   }, [db, undo, refresh]);
 
-  // The TV Time export only enumerates *unwatched* episodes; watched ones are
-  // counts. Until Phase 4 adds episode metadata, the checklist can only list
-  // known rows and must say so instead of pretending it's complete.
-  const knownRows = episodes.length;
+  // Before TVDB metadata is fetched, the checklist can only list the
+  // imported unwatched rows and must say so instead of pretending it's
+  // complete. After enrichment the catalog is full and the banner goes away.
+  const knownRows = episodes.filter((e) => e.is_special === 0).length;
   const totalCount = show?.total_count ?? null;
   const missingRows = totalCount !== null ? Math.max(0, totalCount - knownRows) : null;
+  // Episodes watched per the import carry no dates — TV Time's export
+  // doesn't include per-episode history.
+  const hasDatelessWatched = episodes.some((e) => e.is_watched === 1 && e.watched_at === null);
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
@@ -117,26 +120,41 @@ export default function ShowDetailScreen() {
               <Ionicons name="arrow-back" size={20} color={colors.text} />
               <Text style={styles.backText}>Shows</Text>
             </Pressable>
-            <Text style={styles.title} numberOfLines={2}>
-              {show.title}
-              {show.is_favorite === 1 ? (
-                <Text>
-                  {'  '}
-                  <Ionicons name="star" size={16} color={colors.favorite} />
-                </Text>
+            <View style={styles.headerRow}>
+              {show.poster_url ? (
+                <Image source={{ uri: show.poster_url }} style={styles.headerPoster} />
               ) : null}
-            </Text>
-            <Text style={styles.meta}>
-              {[
-                show.status ? (STATUS_LABELS[show.status] ?? show.status) : null,
-                show.watched_count !== null && show.total_count !== null
-                  ? `${show.watched_count} / ${show.total_count} eps`
-                  : null,
-                show.progress_percent !== null ? `${Math.round(show.progress_percent)}%` : null,
-              ]
-                .filter(Boolean)
-                .join(' · ')}
-            </Text>
+              <View style={styles.headerInfo}>
+                <Text style={styles.title} numberOfLines={2}>
+                  {show.title}
+                  {show.is_favorite === 1 ? (
+                    <Text>
+                      {'  '}
+                      <Ionicons name="star" size={16} color={colors.favorite} />
+                    </Text>
+                  ) : null}
+                </Text>
+                <Text style={styles.meta}>
+                  {[
+                    show.status ? (STATUS_LABELS[show.status] ?? show.status) : null,
+                    show.watched_count !== null && show.total_count !== null
+                      ? `${show.watched_count} / ${show.total_count} eps`
+                      : null,
+                    show.progress_percent !== null
+                      ? `${Math.round(show.progress_percent)}%`
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </Text>
+                <Text style={styles.meta}>TVDB ID: {show.tvdb_id}</Text>
+              </View>
+            </View>
+            {show.overview ? (
+              <Text style={styles.overview} numberOfLines={4}>
+                {show.overview}
+              </Text>
+            ) : null}
             <View style={styles.progressWrap}>
               <ProgressBar
                 progress={show.progress_percent !== null ? show.progress_percent / 100 : 0}
@@ -144,6 +162,16 @@ export default function ShowDetailScreen() {
               />
             </View>
           </View>
+
+          {hasDatelessWatched ? (
+            <View style={styles.notice}>
+              <Ionicons name="time" size={16} color={colors.accent} />
+              <Text style={styles.noticeText}>
+                Imported progress available, but full historical episode watched dates were not
+                included in the export.
+              </Text>
+            </View>
+          ) : null}
 
           {missingRows !== null && missingRows > 0 ? (
             <View style={styles.notice}>
@@ -254,6 +282,25 @@ const styles = StyleSheet.create({
   backText: {
     ...typography.body,
     color: colors.textSecondary,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    gap: spacing.md,
+  },
+  headerPoster: {
+    width: 72,
+    height: 108,
+    borderRadius: radius.sm,
+    backgroundColor: colors.surface,
+  },
+  headerInfo: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  overview: {
+    ...typography.caption,
+    lineHeight: 18,
+    marginTop: spacing.md,
   },
   title: {
     ...typography.title,
