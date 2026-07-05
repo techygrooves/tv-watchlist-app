@@ -4,7 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import { Suspense } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
-import { DATABASE_NAME, migrateDb } from '@/src/db/database';
+import { DATABASE_NAME, migrateDb } from '@/src/lib/db';
 import { colors } from '@/src/theme';
 
 export default function RootLayout() {

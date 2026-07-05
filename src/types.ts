@@ -1,5 +1,5 @@
 /**
- * Shared domain types. These mirror the SQLite schema in src/db/schema.ts.
+ * Shared domain types. These mirror the SQLite schema in src/lib/db.ts.
  *
  * The TVDB numeric ID is the canonical *external* identifier for every show
  * and movie (never the title). The local `id` column is an internal
