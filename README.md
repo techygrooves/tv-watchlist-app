@@ -24,8 +24,9 @@ npm run typecheck  # TypeScript check
 src/
   app/                expo-router routes
     _layout.tsx       root layout: SQLite provider + DB migration on boot
+    index.tsx         "/" route — redirects straight to the Shows tab
     (tabs)/           bottom tab navigator
-      index.tsx       Shows (default tab)
+      shows.tsx       Shows (default tab)
       movies.tsx      Movies
       explore.tsx     Explore (search later)
       upcoming.tsx    Upcoming episodes
