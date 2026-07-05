@@ -3,7 +3,7 @@ import * as Sharing from 'expo-sharing';
 import { Platform } from 'react-native';
 import type { SQLiteDatabase } from 'expo-sqlite';
 
-import { getAppStats, type AppStats } from './queries';
+import { getAppStats, getEpisodeStats, type AppStats } from './queries';
 import type { MediaItem } from '@/src/types';
 
 /**
@@ -101,7 +101,7 @@ interface EpisodeCsvRow {
   watched_at: string | null;
 }
 
-/** Episode rows, or null when no episodes exist. Watched state derives from watch_events. */
+/** Episode rows, or null when no episodes exist. */
 export async function buildEpisodesCsv(db: SQLiteDatabase): Promise<string | null> {
   const rows = await db.getAllAsync<EpisodeCsvRow>(
     `SELECT
@@ -111,12 +111,11 @@ export async function buildEpisodesCsv(db: SQLiteDatabase): Promise<string | nul
        e.episode_number,
        e.title,
        e.air_date,
-       (e.season_number = 0) AS is_special,
-       (we.id IS NOT NULL) AS is_watched,
-       we.watched_at
+       e.is_special,
+       e.is_watched,
+       e.watched_at
      FROM episodes e
      JOIN media_items m ON m.id = e.media_item_id
-     LEFT JOIN watch_events we ON we.episode_id = e.id AND we.action = 'watched'
      ORDER BY m.tvdb_id, e.season_number, e.episode_number`,
   );
   if (rows.length === 0) return null;
@@ -138,6 +137,7 @@ export async function buildEpisodesCsv(db: SQLiteDatabase): Promise<string | nul
 
 export async function buildTxtSummary(db: SQLiteDatabase): Promise<string> {
   const stats = await getAppStats(db);
+  const episodeStats = await getEpisodeStats(db);
   const recent = await db.getAllAsync<{ title: string; year: number | null; watched_at: string }>(
     `SELECT title, year, watched_at FROM media_items
      WHERE media_type = 'movie' AND is_watched = 1 AND watched_at IS NOT NULL
@@ -157,6 +157,10 @@ export async function buildTxtSummary(db: SQLiteDatabase): Promise<string> {
     `Completed shows: ${stats.completedShows}`,
     `In-progress shows: ${stats.inProgressShows}`,
     `Not started shows: ${stats.notStartedShows}`,
+    '',
+    `Episode rows tracked: ${episodeStats.episodeRows}`,
+    `Watched episodes (tracked): ${episodeStats.watchedEpisodes}`,
+    `Unwatched episodes (tracked): ${episodeStats.unwatchedEpisodes}`,
   ];
   if (recent.length > 0) {
     lines.push('', 'Recently watched movies:');

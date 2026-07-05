@@ -41,6 +41,10 @@ export interface Episode {
   overview: string | null;
   air_date: string | null;
   runtime_minutes: number | null;
+  is_special: 0 | 1;
+  is_watched: 0 | 1;
+  watched_at: string | null;
+  raw_json: string | null;
 }
 
 export type WatchSource = 'manual' | 'imported_watched';

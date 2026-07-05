@@ -72,11 +72,14 @@ export async function saveTvTimeImport(
 
   await db.withTransactionAsync(async () => {
     const upsertItem = await db.prepareAsync(UPSERT_MEDIA_ITEM);
+    // Only unwatched imported rows are replaced — episodes the user marked
+    // watched in the app survive re-imports (INSERT OR IGNORE skips them
+    // via the (media_item_id, season, episode) unique constraint).
     const clearEpisodes = await db.prepareAsync(
-      'DELETE FROM episodes WHERE media_item_id = $id',
+      'DELETE FROM episodes WHERE media_item_id = $id AND is_watched = 0',
     );
     const insertEpisode = await db.prepareAsync(
-      'INSERT OR IGNORE INTO episodes (media_item_id, season_number, episode_number) VALUES ($id, $season, $episode)',
+      'INSERT OR IGNORE INTO episodes (media_item_id, season_number, episode_number, is_special, raw_json) VALUES ($id, $season, $episode, 0, $raw)',
     );
     const clearImportedEvents = await db.prepareAsync(
       "DELETE FROM watch_events WHERE media_item_id = $id AND source = 'imported_watched'",
@@ -117,6 +120,7 @@ export async function saveTvTimeImport(
             $id: id,
             $season: ep.season,
             $episode: ep.episode,
+            $raw: JSON.stringify(ep),
           });
           result.episodesSaved++;
         }

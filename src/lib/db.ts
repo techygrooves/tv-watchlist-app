@@ -20,7 +20,7 @@ export const DATABASE_NAME = 'tv-watchlist.db';
  *   a JSON summary snapshot.
  * - app_settings is a simple key/value store.
  */
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS media_items (
@@ -58,6 +58,10 @@ CREATE TABLE IF NOT EXISTS episodes (
   overview        TEXT,
   air_date        TEXT,
   runtime_minutes INTEGER,
+  is_special      INTEGER NOT NULL DEFAULT 0,
+  is_watched      INTEGER NOT NULL DEFAULT 0,
+  watched_at      TEXT,
+  raw_json        TEXT,
   UNIQUE (media_item_id, season_number, episode_number)
 );
 
@@ -120,14 +124,26 @@ export async function migrateDb(db: SQLiteDatabase): Promise<void> {
       DROP TABLE IF EXISTS import_files;
     `);
     await db.execAsync(SCHEMA_SQL);
-  } else if (currentVersion < 3) {
-    // v2 → v3: watch_events gains the action column. Existing rows are all
-    // imported movie watches, so the 'watched' default is correct for them.
-    await db.execAsync(
-      "ALTER TABLE watch_events ADD COLUMN action TEXT NOT NULL DEFAULT 'watched' CHECK (action IN ('watched', 'unwatched'))",
-    );
+  } else {
+    if (currentVersion < 3) {
+      // v2 → v3: watch_events gains the action column. Existing rows are all
+      // imported movie watches, so the 'watched' default is correct for them.
+      await db.execAsync(
+        "ALTER TABLE watch_events ADD COLUMN action TEXT NOT NULL DEFAULT 'watched' CHECK (action IN ('watched', 'unwatched'))",
+      );
+    }
+    if (currentVersion < 4) {
+      // v3 → v4: episodes become individual checklist items. Existing rows
+      // are the imported unwatched episodes, so the defaults are correct.
+      await db.execAsync(`
+        ALTER TABLE episodes ADD COLUMN is_special INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE episodes ADD COLUMN is_watched INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE episodes ADD COLUMN watched_at TEXT;
+        ALTER TABLE episodes ADD COLUMN raw_json TEXT;
+      `);
+    }
   }
-  // Future migrations: if (currentVersion < 4) { ... }
+  // Future migrations: if (currentVersion < 5) { ... }
 
   await db.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
