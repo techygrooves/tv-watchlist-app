@@ -26,7 +26,23 @@ import {
 } from '@/src/lib/exporter';
 import { saveTvTimeImport, type ImportResult } from '@/src/lib/importer';
 import { getAppStats, listImportFiles, type AppStats } from '@/src/lib/queries';
+import {
+  getBackgroundUpdatesStatus,
+  type BackgroundUpdatesStatus,
+} from '@/src/lib/backgroundUpdates';
+import {
+  getNotificationPermission,
+  notifyNewEpisodes,
+  requestNotificationPermission,
+  type NotificationPermission,
+} from '@/src/lib/notifications';
 import { fetchSeries, tvdbLogin, TvdbError } from '@/src/lib/tvdb';
+import {
+  checkForShowUpdates,
+  getUpdateCheckStatus,
+  type UpdateCheckProgress,
+  type UpdateCheckStatusInfo,
+} from '@/src/lib/updateChecker';
 import {
   parseTvTimeExport,
   TvTimeParseError,
@@ -56,6 +72,26 @@ export default function ProfileScreen() {
   const [busy, setBusy] = useState<'picking' | 'saving' | 'exporting' | 'tvdb' | null>(null);
   const [enrich, setEnrich] = useState<EnrichProgress | null>(null);
   const cancelEnrich = useRef(false);
+  const [updateCheck, setUpdateCheck] = useState<UpdateCheckProgress | null>(null);
+  const cancelUpdateCheck = useRef(false);
+  const [updateStatus, setUpdateStatus] = useState<UpdateCheckStatusInfo | null>(null);
+  const [bgStatus, setBgStatus] = useState<BackgroundUpdatesStatus | null>(null);
+  const [notifStatus, setNotifStatus] = useState<NotificationPermission | null>(null);
+
+  const refreshUpdateInfo = useCallback(async () => {
+    const [status, bg, notif] = await Promise.all([
+      getUpdateCheckStatus(db),
+      getBackgroundUpdatesStatus(),
+      getNotificationPermission(),
+    ]);
+    setUpdateStatus(status);
+    setBgStatus(bg);
+    setNotifStatus(notif);
+  }, [db]);
+
+  useEffect(() => {
+    refreshUpdateInfo();
+  }, [refreshUpdateInfo]);
   const [pending, setPending] = useState<PendingImport | null>(null);
   const [lastResult, setLastResult] = useState<ImportResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -185,6 +221,33 @@ export default function ProfileScreen() {
     }
   }, [db]);
 
+  const onCheckUpdates = useCallback(async () => {
+    setError(null);
+    setNotice(null);
+    cancelUpdateCheck.current = false;
+    try {
+      const result = await checkForShowUpdates(db, {
+        onProgress: setUpdateCheck,
+        shouldCancel: () => cancelUpdateCheck.current,
+      });
+      await notifyNewEpisodes(result.newEpisodes);
+      setNotice(
+        result.totalShows === 0
+          ? 'No shows have TVDB episode catalogs yet — run Fetch Missing Metadata first.'
+          : `Update check ${cancelUpdateCheck.current ? 'stopped' : 'finished'}: ${result.checkedShows} shows checked, ${result.newEpisodes} new episodes found, ${result.failedShows} failed.${result.failedShows > 0 ? ' Tap again to retry.' : ''}`,
+      );
+    } catch (err) {
+      setError(err instanceof TvdbError ? err.message : `Update check failed: ${String(err)}`);
+    } finally {
+      setUpdateCheck(null);
+      await refreshUpdateInfo();
+    }
+  }, [db, refreshUpdateInfo]);
+
+  const onRequestNotifications = useCallback(async () => {
+    setNotifStatus(await requestNotificationPermission());
+  }, []);
+
   const confirmImport = useCallback(async () => {
     if (!pending) return;
     setBusy('saving');
@@ -290,6 +353,56 @@ export default function ProfileScreen() {
           </Text>
         </View>
 
+        <SectionHeader label="Updates" />
+        <View style={styles.group}>
+          <SettingRow
+            icon="refresh"
+            label="Check for Updates Now"
+            detail="New episodes from TVDB"
+            disabled={busy !== null || enrich !== null || updateCheck !== null}
+            onPress={onCheckUpdates}
+          />
+          <SettingRow
+            icon="sync"
+            label="Background updates"
+            detail={
+              bgStatus === 'registered'
+                ? 'On · ~twice daily'
+                : bgStatus === 'restricted'
+                  ? 'Restricted by OS'
+                  : 'Unavailable · runs on app open'
+            }
+          />
+          <SettingRow
+            icon="time"
+            label="Last check"
+            detail={
+              updateStatus?.lastCheckAt
+                ? new Date(updateStatus.lastCheckAt).toLocaleString()
+                : 'never'
+            }
+          />
+          <SettingRow
+            icon="sparkles"
+            label="New episodes in last check"
+            detail={String(updateStatus?.lastCheckNewEpisodes ?? 0)}
+          />
+          <SettingRow
+            icon="notifications"
+            label="Notifications"
+            detail={
+              notifStatus === 'granted'
+                ? 'Allowed'
+                : notifStatus === 'denied'
+                  ? 'Denied · updates stay silent'
+                  : notifStatus === 'undetermined'
+                    ? 'Tap to allow'
+                    : 'Unavailable on this platform'
+            }
+            onPress={notifStatus === 'undetermined' ? onRequestNotifications : undefined}
+          />
+        </View>
+
         {imports.length > 0 ? (
           <>
             <SectionHeader label="Import history" count={imports.length} />
@@ -319,7 +432,7 @@ export default function ProfileScreen() {
         <SectionHeader label="About" />
         <View style={styles.group}>
           <SettingRow icon="server" label="Storage" detail="Local SQLite only — no account" />
-          <SettingRow icon="information-circle" label="Version" detail="1.0.0 · Phase 3" />
+          <SettingRow icon="information-circle" label="Version" detail="1.0.0 · Phase 5" />
         </View>
       </ScrollView>
 
@@ -331,6 +444,10 @@ export default function ProfileScreen() {
       />
       <StatsModal stats={stats} onClose={() => setStats(null)} />
       <EnrichModal progress={enrich} onCancel={() => (cancelEnrich.current = true)} />
+      <UpdateCheckModal
+        progress={updateCheck}
+        onCancel={() => (cancelUpdateCheck.current = true)}
+      />
     </Screen>
   );
 }
@@ -501,6 +618,50 @@ function ImportPreviewModal({
               ) : (
                 <Text style={styles.confirmButtonText}>Confirm Import</Text>
               )}
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function UpdateCheckModal({
+  progress,
+  onCancel,
+}: {
+  progress: UpdateCheckProgress | null;
+  onCancel: () => void;
+}) {
+  if (!progress) return null;
+  const rows: [string, string | number][] = [
+    ['Shows to check', progress.totalShows],
+    ['Checked', progress.checkedShows],
+    ['New episodes found', progress.newEpisodes],
+    ['Failed', progress.failedShows],
+  ];
+  return (
+    <Modal transparent animationType="fade" visible onRequestClose={onCancel}>
+      <View style={styles.modalBackdrop}>
+        <View style={styles.modalCard}>
+          <Text style={styles.modalTitle}>Checking for updates…</Text>
+          <Text style={styles.modalFile} numberOfLines={1}>
+            {progress.currentTitle ?? 'Preparing…'}
+          </Text>
+          <View style={styles.statsGrid}>
+            {rows.map(([label, value]) => (
+              <View key={label} style={styles.statRow}>
+                <Text style={styles.statLabel}>{label}</Text>
+                <Text style={styles.statValue}>{value}</Text>
+              </View>
+            ))}
+          </View>
+          <View style={styles.modalButtons}>
+            <Pressable
+              onPress={onCancel}
+              style={({ pressed }) => [styles.cancelButton, pressed && { opacity: 0.7 }]}
+            >
+              <Text style={styles.cancelButtonText}>Stop after current show</Text>
             </Pressable>
           </View>
         </View>

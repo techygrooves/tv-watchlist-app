@@ -28,6 +28,7 @@ export interface MediaItem {
   on_watchlist: 0 | 1;
   raw_json: string | null;
   metadata_fetched_at: string | null;
+  last_checked_at: string | null;
   added_at: string;
   updated_at: string;
 }
@@ -46,6 +47,7 @@ export interface Episode {
   is_watched: 0 | 1;
   watched_at: string | null;
   raw_json: string | null;
+  added_at: string | null;
 }
 
 export type WatchSource = 'manual' | 'imported_watched';

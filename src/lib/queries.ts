@@ -123,42 +123,48 @@ export interface UpcomingEpisode extends Episode {
   show_tvdb_id: number;
 }
 
+export type EpisodeFeedFilter = 'all' | 'upcoming' | 'aired_unwatched' | 'recently_added';
+
+const EPISODE_FEED_SELECT = `
+  SELECT e.*, m.id AS show_id, m.title AS show_title, m.poster_url AS show_poster, m.tvdb_id AS show_tvdb_id
+  FROM episodes e
+  JOIN media_items m ON m.id = e.media_item_id
+  WHERE m.on_watchlist = 1`;
+
+/**
+ * Episode feed for the Upcoming tab.
+ * - all: every unwatched episode, dated ones first (newest air date first)
+ * - upcoming: unwatched with a future air date, soonest first
+ * - aired_unwatched: unwatched that already aired, most recent first
+ * - recently_added: episodes discovered by update checks, newest first
+ *   (includes watched ones so their status is visible)
+ */
+export async function listEpisodeFeed(
+  db: SQLiteDatabase,
+  filter: EpisodeFeedFilter,
+  limit = 200,
+): Promise<UpcomingEpisode[]> {
+  const queries: Record<EpisodeFeedFilter, string> = {
+    all: `${EPISODE_FEED_SELECT} AND e.is_watched = 0
+          ORDER BY (e.air_date IS NULL) ASC, e.air_date DESC, m.title COLLATE NOCASE, e.season_number, e.episode_number`,
+    upcoming: `${EPISODE_FEED_SELECT} AND e.is_watched = 0
+          AND e.air_date IS NOT NULL AND e.air_date >= date('now')
+          ORDER BY e.air_date ASC, m.title COLLATE NOCASE, e.season_number, e.episode_number`,
+    aired_unwatched: `${EPISODE_FEED_SELECT} AND e.is_watched = 0
+          AND e.air_date IS NOT NULL AND e.air_date < date('now')
+          ORDER BY e.air_date DESC, m.title COLLATE NOCASE, e.season_number, e.episode_number`,
+    recently_added: `${EPISODE_FEED_SELECT} AND e.added_at IS NOT NULL
+          ORDER BY e.added_at DESC, m.title COLLATE NOCASE, e.season_number, e.episode_number`,
+  };
+  return db.getAllAsync<UpcomingEpisode>(`${queries[filter]} LIMIT ?`, limit);
+}
+
 /** Unwatched episodes airing today or later, soonest first. */
 export async function listUpcomingEpisodes(
   db: SQLiteDatabase,
   limit = 100,
 ): Promise<UpcomingEpisode[]> {
-  return db.getAllAsync<UpcomingEpisode>(
-    `SELECT e.*, m.id AS show_id, m.title AS show_title, m.poster_url AS show_poster, m.tvdb_id AS show_tvdb_id
-     FROM episodes e
-     JOIN media_items m ON m.id = e.media_item_id
-     WHERE e.is_watched = 0 AND m.on_watchlist = 1
-       AND e.air_date IS NOT NULL AND e.air_date >= date('now')
-     ORDER BY e.air_date ASC, m.title COLLATE NOCASE, e.season_number, e.episode_number
-     LIMIT ?`,
-    limit,
-  );
-}
-
-/** Fallback when nothing has future air dates: each show's next unwatched episode. */
-export async function listNextUnwatchedEpisodes(
-  db: SQLiteDatabase,
-  limit = 100,
-): Promise<UpcomingEpisode[]> {
-  return db.getAllAsync<UpcomingEpisode>(
-    `SELECT e.*, m.id AS show_id, m.title AS show_title, m.poster_url AS show_poster, m.tvdb_id AS show_tvdb_id
-     FROM episodes e
-     JOIN media_items m ON m.id = e.media_item_id
-     WHERE e.is_watched = 0 AND m.on_watchlist = 1 AND e.is_special = 0
-       AND e.id = (
-         SELECT e2.id FROM episodes e2
-         WHERE e2.media_item_id = e.media_item_id AND e2.is_watched = 0 AND e2.is_special = 0
-         ORDER BY e2.season_number, e2.episode_number LIMIT 1
-       )
-     ORDER BY m.title COLLATE NOCASE
-     LIMIT ?`,
-    limit,
-  );
+  return listEpisodeFeed(db, 'upcoming', limit);
 }
 
 export interface AppStats {
