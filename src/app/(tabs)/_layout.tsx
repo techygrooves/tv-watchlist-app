@@ -18,7 +18,7 @@ export default function TabsLayout() {
       }}
     >
       <Tabs.Screen
-        name="index"
+        name="shows"
         options={{
           title: 'Shows',
           tabBarIcon: ({ color, size }) => <Ionicons name="tv" size={size} color={color} />,

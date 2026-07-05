@@ -90,7 +90,33 @@ export default function ProfileScreen() {
             update; for now the file is stored and queued.
           </Text>
 
-          <SettingRow icon="download" label="Export TXT / CSV" detail="Later phase" disabled />
+          <SettingRow
+            icon="grid"
+            label="Export CSV"
+            detail="Later phase"
+            onPress={() =>
+              Alert.alert('Export CSV', 'CSV export of your watch history arrives in a later phase.')
+            }
+          />
+          <SettingRow
+            icon="document-text"
+            label="Export TXT"
+            detail="Later phase"
+            onPress={() =>
+              Alert.alert('Export TXT', 'TXT export of your watch history arrives in a later phase.')
+            }
+          />
+          <SettingRow
+            icon="stats-chart"
+            label="App Statistics"
+            detail="Later phase"
+            onPress={() =>
+              Alert.alert(
+                'App Statistics',
+                'Watch-time totals and per-show stats arrive in a later phase.',
+              )
+            }
+          />
         </View>
 
         <SectionHeader label="Library updates" />
@@ -140,18 +166,28 @@ function SettingRow({
   label,
   detail,
   disabled,
+  onPress,
 }: {
   icon: React.ComponentProps<typeof Ionicons>['name'];
   label: string;
   detail?: string;
   disabled?: boolean;
+  onPress?: () => void;
 }) {
   return (
-    <View style={[styles.row, disabled && styles.rowDisabled]}>
+    <Pressable
+      onPress={onPress}
+      disabled={disabled || !onPress}
+      style={[styles.row, disabled && styles.rowDisabled]}
+      android_ripple={onPress ? { color: colors.border } : undefined}
+    >
       <Ionicons name={icon} size={18} color={disabled ? colors.textMuted : colors.accent} />
       <Text style={styles.rowLabel}>{label}</Text>
       {detail ? <Text style={styles.rowDetail}>{detail}</Text> : null}
-    </View>
+      {onPress ? (
+        <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+      ) : null}
+    </Pressable>
   );
 }
 
