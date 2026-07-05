@@ -5,7 +5,6 @@ import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Modal,
   Platform,
   Pressable,
@@ -17,8 +16,15 @@ import {
 
 import { Screen } from '@/src/components/Screen';
 import { SectionHeader } from '@/src/components/SectionHeader';
+import {
+  buildEpisodesCsv,
+  buildMediaItemsCsv,
+  buildTxtSummary,
+  deliverFile,
+  exportFilename,
+} from '@/src/lib/exporter';
 import { saveTvTimeImport, type ImportResult } from '@/src/lib/importer';
-import { listImportFiles } from '@/src/lib/queries';
+import { getAppStats, listImportFiles, type AppStats } from '@/src/lib/queries';
 import {
   parseTvTimeExport,
   TvTimeParseError,
@@ -45,10 +51,12 @@ async function readAssetText(asset: DocumentPicker.DocumentPickerAsset): Promise
 export default function ProfileScreen() {
   const db = useSQLiteContext();
   const [imports, setImports] = useState<ImportFile[]>([]);
-  const [busy, setBusy] = useState<'picking' | 'saving' | null>(null);
+  const [busy, setBusy] = useState<'picking' | 'saving' | 'exporting' | null>(null);
   const [pending, setPending] = useState<PendingImport | null>(null);
   const [lastResult, setLastResult] = useState<ImportResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [stats, setStats] = useState<AppStats | null>(null);
 
   const refreshImports = useCallback(async () => {
     setImports(await listImportFiles(db));
@@ -87,6 +95,48 @@ export default function ProfileScreen() {
       setBusy(null);
     }
   }, []);
+
+  const onExportCsv = useCallback(async () => {
+    setBusy('exporting');
+    setError(null);
+    setNotice(null);
+    try {
+      const mediaCsv = await buildMediaItemsCsv(db);
+      await deliverFile(exportFilename('export', 'csv'), mediaCsv, 'text/csv');
+      const episodesCsv = await buildEpisodesCsv(db);
+      if (episodesCsv) {
+        await deliverFile(exportFilename('export-episodes', 'csv'), episodesCsv, 'text/csv');
+      }
+      setNotice(
+        episodesCsv
+          ? 'Exported two CSV files: media items and episodes.'
+          : 'Exported the media items CSV.',
+      );
+    } catch (err) {
+      setError(`CSV export failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setBusy(null);
+    }
+  }, [db]);
+
+  const onExportTxt = useCallback(async () => {
+    setBusy('exporting');
+    setError(null);
+    setNotice(null);
+    try {
+      const summary = await buildTxtSummary(db);
+      await deliverFile(exportFilename('summary', 'txt'), summary, 'text/plain');
+      setNotice('Exported the TXT summary.');
+    } catch (err) {
+      setError(`TXT export failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setBusy(null);
+    }
+  }, [db]);
+
+  const onShowStats = useCallback(async () => {
+    setStats(await getAppStats(db));
+  }, [db]);
 
   const confirmImport = useCallback(async () => {
     if (!pending) return;
@@ -147,33 +197,28 @@ export default function ProfileScreen() {
             </View>
           ) : null}
 
+          {notice ? (
+            <View style={styles.successBox}>
+              <Ionicons name="checkmark-circle" size={18} color={colors.watched} />
+              <Text style={styles.successText}>{notice}</Text>
+            </View>
+          ) : null}
+
           <SettingRow
             icon="grid"
             label="Export CSV"
-            detail="Later phase"
-            onPress={() =>
-              Alert.alert('Export CSV', 'CSV export of your watch history arrives in a later phase.')
-            }
+            detail={busy === 'exporting' ? 'Working…' : 'Media items + episodes'}
+            disabled={busy !== null}
+            onPress={onExportCsv}
           />
           <SettingRow
             icon="document-text"
             label="Export TXT"
-            detail="Later phase"
-            onPress={() =>
-              Alert.alert('Export TXT', 'TXT export of your watch history arrives in a later phase.')
-            }
+            detail={busy === 'exporting' ? 'Working…' : 'Summary'}
+            disabled={busy !== null}
+            onPress={onExportTxt}
           />
-          <SettingRow
-            icon="stats-chart"
-            label="App Statistics"
-            detail="Later phase"
-            onPress={() =>
-              Alert.alert(
-                'App Statistics',
-                'Watch-time totals and per-show stats arrive in a later phase.',
-              )
-            }
-          />
+          <SettingRow icon="stats-chart" label="App Statistics" onPress={onShowStats} />
         </View>
 
         {imports.length > 0 ? (
@@ -205,7 +250,7 @@ export default function ProfileScreen() {
         <SectionHeader label="About" />
         <View style={styles.group}>
           <SettingRow icon="server" label="Storage" detail="Local SQLite only — no account" />
-          <SettingRow icon="information-circle" label="Version" detail="1.0.0 · Phase 2" />
+          <SettingRow icon="information-circle" label="Version" detail="1.0.0 · Phase 3" />
         </View>
       </ScrollView>
 
@@ -215,7 +260,53 @@ export default function ProfileScreen() {
         onCancel={() => setPending(null)}
         onConfirm={confirmImport}
       />
+      <StatsModal stats={stats} onClose={() => setStats(null)} />
     </Screen>
+  );
+}
+
+function StatsModal({ stats, onClose }: { stats: AppStats | null; onClose: () => void }) {
+  if (!stats) return null;
+  const rows: [string, string | number][] = [
+    ['Total shows', stats.totalShows],
+    ['Total movies', stats.totalMovies],
+    ['Watched movies', stats.watchedMovies],
+    ['Unwatched movies', stats.unwatchedMovies],
+    ['Favorite shows', stats.favoriteShows],
+    ['Favorite movies', stats.favoriteMovies],
+    ['Completed shows', stats.completedShows],
+    ['In-progress shows', stats.inProgressShows],
+    ['Not started shows', stats.notStartedShows],
+    ['Watch events', stats.watchEventsCount],
+    ['Last import', stats.lastImportDate ?? 'never'],
+  ];
+  return (
+    <Modal transparent animationType="fade" visible onRequestClose={onClose}>
+      <View style={styles.modalBackdrop}>
+        <View style={styles.modalCard}>
+          <Text style={styles.modalTitle}>App Statistics</Text>
+          <View style={[styles.statsGrid, { marginTop: spacing.md }]}>
+            {rows.map(([label, value]) => (
+              <View key={label} style={styles.statRow}>
+                <Text style={styles.statLabel}>{label}</Text>
+                <Text style={styles.statValue}>{value}</Text>
+              </View>
+            ))}
+          </View>
+          <View style={styles.modalButtons}>
+            <Pressable
+              onPress={onClose}
+              style={({ pressed }) => [
+                styles.confirmButton,
+                pressed && { backgroundColor: colors.accentDim },
+              ]}
+            >
+              <Text style={styles.confirmButtonText}>Close</Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    </Modal>
   );
 }
 
