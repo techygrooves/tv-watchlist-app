@@ -21,7 +21,16 @@ export interface PosterCardItem {
  * metadata in a later phase). The poster shows the title's initials on a
  * hue derived from the TVDB ID so rows are visually distinct.
  */
-export function PosterCard({ item, onPress }: { item: PosterCardItem; onPress?: () => void }) {
+export function PosterCard({
+  item,
+  onPress,
+  onToggleWatched,
+}: {
+  item: PosterCardItem;
+  onPress?: () => void;
+  /** When provided, the trailing check icon becomes a watched/unwatched toggle. */
+  onToggleWatched?: () => void;
+}) {
   return (
     <Pressable
       onPress={onPress}
@@ -51,13 +60,19 @@ export function PosterCard({ item, onPress }: { item: PosterCardItem; onPress?: 
         ) : null}
       </View>
 
-      <View style={styles.trailing}>
+      <Pressable
+        style={styles.trailing}
+        onPress={onToggleWatched}
+        disabled={!onToggleWatched}
+        hitSlop={10}
+        accessibilityLabel={item.isWatched ? `Mark ${item.title} unwatched` : `Mark ${item.title} watched`}
+      >
         {item.isWatched ? (
-          <Ionicons name="checkmark-circle" size={22} color={colors.watched} />
+          <Ionicons name="checkmark-circle" size={26} color={colors.watched} />
         ) : (
-          <Ionicons name="ellipse-outline" size={22} color={colors.textMuted} />
+          <Ionicons name="ellipse-outline" size={26} color={colors.textMuted} />
         )}
-      </View>
+      </Pressable>
     </Pressable>
   );
 }

@@ -20,7 +20,7 @@ export const DATABASE_NAME = 'tv-watchlist.db';
  *   a JSON summary snapshot.
  * - app_settings is a simple key/value store.
  */
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS media_items (
@@ -65,6 +65,8 @@ CREATE TABLE IF NOT EXISTS watch_events (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   media_item_id TEXT    NOT NULL REFERENCES media_items(id) ON DELETE CASCADE,
   episode_id    INTEGER REFERENCES episodes(id) ON DELETE CASCADE,
+  action        TEXT    NOT NULL DEFAULT 'watched'
+                CHECK (action IN ('watched', 'unwatched')),
   watched_at    TEXT    NOT NULL DEFAULT (datetime('now')),
   source        TEXT    NOT NULL DEFAULT 'manual'
                 CHECK (source IN ('manual', 'imported_watched')),
@@ -118,8 +120,14 @@ export async function migrateDb(db: SQLiteDatabase): Promise<void> {
       DROP TABLE IF EXISTS import_files;
     `);
     await db.execAsync(SCHEMA_SQL);
+  } else if (currentVersion < 3) {
+    // v2 → v3: watch_events gains the action column. Existing rows are all
+    // imported movie watches, so the 'watched' default is correct for them.
+    await db.execAsync(
+      "ALTER TABLE watch_events ADD COLUMN action TEXT NOT NULL DEFAULT 'watched' CHECK (action IN ('watched', 'unwatched'))",
+    );
   }
-  // Future migrations: if (currentVersion < 3) { ... }
+  // Future migrations: if (currentVersion < 4) { ... }
 
   await db.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }

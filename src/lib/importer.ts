@@ -82,7 +82,7 @@ export async function saveTvTimeImport(
       "DELETE FROM watch_events WHERE media_item_id = $id AND source = 'imported_watched'",
     );
     const insertWatchEvent = await db.prepareAsync(
-      "INSERT INTO watch_events (media_item_id, watched_at, source) VALUES ($id, $watched_at, 'imported_watched')",
+      "INSERT INTO watch_events (media_item_id, action, watched_at, source) VALUES ($id, 'watched', $watched_at, 'imported_watched')",
     );
 
     try {
