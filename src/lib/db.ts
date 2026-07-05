@@ -20,7 +20,7 @@ export const DATABASE_NAME = 'tv-watchlist.db';
  *   a JSON summary snapshot.
  * - app_settings is a simple key/value store.
  */
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS media_items (
@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS media_items (
   on_watchlist     INTEGER NOT NULL DEFAULT 1,
   raw_json         TEXT,
   metadata_fetched_at TEXT,
+  last_checked_at  TEXT,
   added_at         TEXT    NOT NULL DEFAULT (datetime('now')),
   updated_at       TEXT    NOT NULL DEFAULT (datetime('now')),
   UNIQUE (tvdb_id, media_type)
@@ -63,6 +64,7 @@ CREATE TABLE IF NOT EXISTS episodes (
   is_watched      INTEGER NOT NULL DEFAULT 0,
   watched_at      TEXT,
   raw_json        TEXT,
+  added_at        TEXT,
   UNIQUE (media_item_id, season_number, episode_number)
 );
 
@@ -147,8 +149,16 @@ export async function migrateDb(db: SQLiteDatabase): Promise<void> {
       // v4 → v5: track when TVDB metadata was last fetched per item.
       await db.execAsync('ALTER TABLE media_items ADD COLUMN metadata_fetched_at TEXT');
     }
+    if (currentVersion < 6) {
+      // v5 → v6: update-checker bookkeeping — per-show check rotation and
+      // per-episode discovery time (for the Recently added filter).
+      await db.execAsync(`
+        ALTER TABLE media_items ADD COLUMN last_checked_at TEXT;
+        ALTER TABLE episodes ADD COLUMN added_at TEXT;
+      `);
+    }
   }
-  // Future migrations: if (currentVersion < 6) { ... }
+  // Future migrations: if (currentVersion < 7) { ... }
 
   await db.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
