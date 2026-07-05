@@ -7,41 +7,50 @@ export const DATABASE_NAME = 'tv-watchlist.db';
  *
  * Design notes:
  * - media_items holds both shows and movies, discriminated by media_type.
- *   The TVDB numeric ID is the canonical external identifier — rows are
- *   unique on (tvdb_id, media_type), never on title.
- * - episodes belong to a show-type media_item (populated in a later phase
- *   from TVDB metadata / import data).
- * - watch_events is an append-only log: marking something watched inserts a
- *   row, "undo" deletes the most recent row. episode_id is NULL for movies
- *   and for whole-show events.
- * - import_files records every TV Time HTML file the user has imported.
- * - app_settings is a simple key/value store (last update check, etc).
+ *   The row id is "show:{tvdbId}" / "movie:{tvdbId}" — the TVDB numeric ID
+ *   is the canonical external identifier, never the title.
+ * - episodes: for imported shows these are the *unwatched* regular episodes
+ *   reported by TV Time (placeholders; no titles/dates until a later phase).
+ * - watch_events is an append-only log. Movie imports create
+ *   'imported_watched' events carrying the original TV Time watchedAt
+ *   timestamp; manual toggles (Phase 3) will create 'manual' events and
+ *   undo deletes the most recent row. Show episode dates are NOT invented —
+ *   the TV Time export does not include per-episode watch dates.
+ * - import_files records every parsed TV Time HTML import with counts and
+ *   a JSON summary snapshot.
+ * - app_settings is a simple key/value store.
  */
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS media_items (
-  id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  tvdb_id       INTEGER NOT NULL,
-  media_type    TEXT    NOT NULL CHECK (media_type IN ('show', 'movie')),
-  title         TEXT    NOT NULL,
-  year          INTEGER,
-  overview      TEXT,
-  poster_url    TEXT,
-  imdb_id       TEXT,
-  tvtime_uuid   TEXT,
-  status        TEXT,
-  is_favorite   INTEGER NOT NULL DEFAULT 0,
-  on_watchlist  INTEGER NOT NULL DEFAULT 1,
-  rewatch_count INTEGER NOT NULL DEFAULT 0,
-  added_at      TEXT    NOT NULL DEFAULT (datetime('now')),
-  updated_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+  id               TEXT    PRIMARY KEY,
+  media_type       TEXT    NOT NULL CHECK (media_type IN ('show', 'movie')),
+  tvdb_id          INTEGER NOT NULL,
+  imdb_id          TEXT,
+  tvtime_uuid      TEXT,
+  title            TEXT    NOT NULL,
+  year             INTEGER,
+  status           TEXT,
+  overview         TEXT,
+  poster_url       TEXT,
+  is_favorite      INTEGER NOT NULL DEFAULT 0,
+  is_watched       INTEGER NOT NULL DEFAULT 0,
+  watched_count    INTEGER,
+  total_count      INTEGER,
+  progress_percent REAL,
+  watched_at       TEXT,
+  rewatch_count    INTEGER NOT NULL DEFAULT 0,
+  on_watchlist     INTEGER NOT NULL DEFAULT 1,
+  raw_json         TEXT,
+  added_at         TEXT    NOT NULL DEFAULT (datetime('now')),
+  updated_at       TEXT    NOT NULL DEFAULT (datetime('now')),
   UNIQUE (tvdb_id, media_type)
 );
 
 CREATE TABLE IF NOT EXISTS episodes (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
-  media_item_id   INTEGER NOT NULL REFERENCES media_items(id) ON DELETE CASCADE,
+  media_item_id   TEXT    NOT NULL REFERENCES media_items(id) ON DELETE CASCADE,
   tvdb_episode_id INTEGER,
   season_number   INTEGER NOT NULL,
   episode_number  INTEGER NOT NULL,
@@ -54,22 +63,25 @@ CREATE TABLE IF NOT EXISTS episodes (
 
 CREATE TABLE IF NOT EXISTS watch_events (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  media_item_id INTEGER NOT NULL REFERENCES media_items(id) ON DELETE CASCADE,
+  media_item_id TEXT    NOT NULL REFERENCES media_items(id) ON DELETE CASCADE,
   episode_id    INTEGER REFERENCES episodes(id) ON DELETE CASCADE,
   watched_at    TEXT    NOT NULL DEFAULT (datetime('now')),
-  source        TEXT    NOT NULL DEFAULT 'manual' CHECK (source IN ('manual', 'import')),
+  source        TEXT    NOT NULL DEFAULT 'manual'
+                CHECK (source IN ('manual', 'imported_watched')),
   created_at    TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS import_files (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  file_name   TEXT    NOT NULL,
-  file_uri    TEXT,
-  file_size   INTEGER,
-  status      TEXT    NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'parsed', 'failed')),
-  item_count  INTEGER,
-  error       TEXT,
-  imported_at TEXT    NOT NULL DEFAULT (datetime('now'))
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  file_name    TEXT    NOT NULL,
+  file_uri     TEXT,
+  file_size    INTEGER,
+  status       TEXT    NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'parsed', 'failed')),
+  shows_count  INTEGER,
+  movies_count INTEGER,
+  raw_summary  TEXT,
+  error        TEXT,
+  imported_at  TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS app_settings (
@@ -96,10 +108,18 @@ export async function migrateDb(db: SQLiteDatabase): Promise<void> {
   const currentVersion = row?.user_version ?? 0;
   if (currentVersion >= SCHEMA_VERSION) return;
 
-  if (currentVersion < 1) {
+  if (currentVersion < 2) {
+    // v1 (Phase 1) never held imported data — only placeholder UI ran against
+    // it — so upgrading recreates the tables with the import-ready columns.
+    await db.execAsync(`
+      DROP TABLE IF EXISTS watch_events;
+      DROP TABLE IF EXISTS episodes;
+      DROP TABLE IF EXISTS media_items;
+      DROP TABLE IF EXISTS import_files;
+    `);
     await db.execAsync(SCHEMA_SQL);
   }
-  // Future migrations: if (currentVersion < 2) { ... }
+  // Future migrations: if (currentVersion < 3) { ... }
 
   await db.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
@@ -119,18 +139,4 @@ export async function setSetting(db: SQLiteDatabase, key: string, value: string)
     key,
     value,
   );
-}
-
-/** Records a picked TV Time export file; parsing happens in a later phase. */
-export async function recordImportFile(
-  db: SQLiteDatabase,
-  file: { name: string; uri: string | null; size: number | null },
-): Promise<number> {
-  const result = await db.runAsync(
-    'INSERT INTO import_files (file_name, file_uri, file_size) VALUES (?, ?, ?)',
-    file.name,
-    file.uri,
-    file.size,
-  );
-  return result.lastInsertRowId;
 }

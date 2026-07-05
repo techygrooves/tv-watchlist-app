@@ -42,8 +42,7 @@ export function PosterCard({ item, onPress }: { item: PosterCardItem; onPress?: 
           {item.title}
         </Text>
         <Text style={styles.meta} numberOfLines={1}>
-          {item.year ? `${item.year}` : 'Year unknown'}
-          {item.detail ? `  ·  ${item.detail}` : ''}
+          {[item.year, item.detail].filter(Boolean).join('  ·  ')}
         </Text>
         {item.progress !== undefined ? (
           <View style={styles.progressWrap}>
