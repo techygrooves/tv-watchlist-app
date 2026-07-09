@@ -42,22 +42,29 @@ export async function listItemsNeedingMetadata(db: SQLiteDatabase): Promise<Medi
   );
 }
 
-function importedUnwatchedSet(item: MediaItem): Set<string> {
-  const set = new Set<string>();
-  if (!item.raw_json) return set;
+/**
+ * The imported unwatched-episode set, or null when the item carries no
+ * TV Time import data (e.g. it was added from Explore search). The
+ * distinction matters: only genuinely imported shows may have their
+ * remaining episodes inferred as watched.
+ */
+function importedUnwatchedSet(item: MediaItem): Set<string> | null {
+  if (!item.raw_json) return null;
   try {
     const raw = JSON.parse(item.raw_json) as {
       unwatchedRegularEps?: { season: number; episode: number }[];
     };
-    for (const ep of raw.unwatchedRegularEps ?? []) {
+    if (!Array.isArray(raw.unwatchedRegularEps)) return null;
+    const set = new Set<string>();
+    for (const ep of raw.unwatchedRegularEps) {
       if (typeof ep?.season === 'number' && typeof ep?.episode === 'number') {
         set.add(`${ep.season}:${ep.episode}`);
       }
     }
+    return set;
   } catch {
-    // Malformed raw_json — treat as no import knowledge.
+    return null; // malformed raw_json — treat as no import knowledge
   }
-  return set;
 }
 
 function importedWatchedCount(item: MediaItem): number | null {
@@ -134,9 +141,11 @@ async function enrichShow(db: SQLiteDatabase, item: MediaItem): Promise<{ needsR
         }
         // Watched-from-import: a regular episode the export did not list as
         // unwatched and that had aired by the import date. watched_at stays
-        // NULL — the export carries no per-episode dates.
+        // NULL — the export carries no per-episode dates. Shows without
+        // import data (added via Explore) get every episode unwatched.
         const key = `${ep.seasonNumber}:${ep.episodeNumber}`;
         const knownWatched =
+          unwatchedSet !== null &&
           ep.seasonNumber > 0 &&
           !unwatchedSet.has(key) &&
           ep.airDate !== null &&
@@ -210,6 +219,19 @@ async function enrichMovie(db: SQLiteDatabase, item: MediaItem): Promise<void> {
     info.status,
     item.id,
   );
+}
+
+/**
+ * Enriches a single item (used right after adding from Explore search).
+ * For shows this fetches the full episode catalog; items without TV Time
+ * import data get every episode unwatched.
+ */
+export async function enrichItem(db: SQLiteDatabase, item: MediaItem): Promise<void> {
+  if (item.media_type === 'show') {
+    await enrichShow(db, item);
+  } else {
+    await enrichMovie(db, item);
+  }
 }
 
 /**
