@@ -189,6 +189,45 @@ export async function fetchSeriesEpisodes(
   return episodes;
 }
 
+export interface TvdbSearchResult {
+  tvdbId: number;
+  mediaType: 'show' | 'movie';
+  title: string;
+  year: number | null;
+  posterUrl: string | null;
+  overview: string | null;
+  raw: unknown;
+}
+
+/** Searches TVDB for series and movies (min 2 characters). */
+export async function searchTvdb(
+  db: SQLiteDatabase,
+  query: string,
+  limit = 20,
+): Promise<TvdbSearchResult[]> {
+  const q = query.trim();
+  if (q.length < 2) return [];
+  const data = await tvdbGet(db, `/search?query=${encodeURIComponent(q)}&limit=${limit}`);
+  if (!Array.isArray(data)) return [];
+  const results: TvdbSearchResult[] = [];
+  for (const r of data) {
+    const type = r?.type === 'series' ? 'show' : r?.type === 'movie' ? 'movie' : null;
+    const tvdbId = Number(r?.tvdb_id);
+    const title = typeof r?.name === 'string' ? r.name : null;
+    if (!type || !Number.isInteger(tvdbId) || tvdbId <= 0 || !title) continue;
+    results.push({
+      tvdbId,
+      mediaType: type,
+      title,
+      year: r?.year ? Number(r.year) || null : null,
+      posterUrl: tvdbImageUrl(r?.image_url ?? r?.thumbnail),
+      overview: typeof r?.overview === 'string' && r.overview.length > 0 ? r.overview : null,
+      raw: r,
+    });
+  }
+  return results;
+}
+
 export interface TvdbMovieInfo {
   name: string | null;
   posterUrl: string | null;
